@@ -21,7 +21,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import org.apache.drill.common.exceptions.UserException;
 import org.apache.drill.common.expression.FieldReference;
-import org.apache.drill.common.expression.SchemaPath;
 import org.apache.drill.exec.ExecConstants;
 import org.apache.drill.exec.exception.OutOfMemoryException;
 import org.apache.drill.exec.exception.SchemaChangeException;
@@ -81,6 +80,7 @@ public class UnnestRecordBatch extends AbstractTableFunctionRecordBatch<UnnestPO
     }
   }
 
+
   /**
    * Memory manager for Unnest. Estimates the batch size exactly like we do for Flatten.
    */
@@ -121,10 +121,9 @@ public class UnnestRecordBatch extends AbstractTableFunctionRecordBatch<UnnestPO
       // i.e. all rows fit within memory budget.
       setOutputRowCount(Math.min(columnSize.getElementCount(), getOutputRowCount()));
 
-      logger.debug("incoming batch size : {}", getRecordBatchSizer());
-
-      logger.debug("output batch size : {}, avg outgoing rowWidth : {}, output rowCount : {}",
-          outputBatchSize, avgOutgoingRowWidth, getOutputRowCount());
+      if (logger.isDebugEnabled()) {
+        logger.debug("BATCH_STATS, incoming:\n {}", getRecordBatchSizer());
+      }
 
       updateIncomingStats();
     }
@@ -134,6 +133,7 @@ public class UnnestRecordBatch extends AbstractTableFunctionRecordBatch<UnnestPO
 
   public UnnestRecordBatch(UnnestPOP pop, FragmentContext context) throws OutOfMemoryException {
     super(pop, context);
+    pop.addUnnestBatch(this);
     // get the output batch size from config.
     int configuredBatchSize = (int) context.getOptions().getOption(ExecConstants.OUTPUT_BATCH_SIZE_VALIDATOR);
     memoryManager = new UnnestMemoryManager(configuredBatchSize);
@@ -165,7 +165,6 @@ public class UnnestRecordBatch extends AbstractTableFunctionRecordBatch<UnnestPO
     }
     hasRemainder = false; // whatever the case, we need to stop processing the current row.
   }
-
 
   @Override
   public IterOutcome innerNext() {
@@ -208,6 +207,9 @@ public class UnnestRecordBatch extends AbstractTableFunctionRecordBatch<UnnestPO
       } finally {
         stats.stopSetup();
       }
+      // since we never called next on an upstream operator, incoming stats are
+      // not updated. update input stats explicitly.
+      stats.batchReceived(0, incoming.getRecordCount(), true);
       return IterOutcome.OK_NEW_SCHEMA;
     } else {
       assert state != BatchState.FIRST : "First batch should be OK_NEW_SCHEMA";
@@ -224,11 +226,13 @@ public class UnnestRecordBatch extends AbstractTableFunctionRecordBatch<UnnestPO
           context.getExecutorState().fail(ex);
           return IterOutcome.STOP;
         }
+        stats.batchReceived(0, incoming.getRecordCount(), true);
         return OK_NEW_SCHEMA;
       }
       if (lateral.getRecordIndex() == 0) {
         unnest.resetGroupIndex();
       }
+      stats.batchReceived(0, incoming.getRecordCount(), false);
       return doWork();
     }
 
@@ -261,7 +265,6 @@ public class UnnestRecordBatch extends AbstractTableFunctionRecordBatch<UnnestPO
     unnest.setUnnestField(vector);
   }
 
-  @Override
   protected IterOutcome doWork() {
     Preconditions.checkNotNull(lateral);
     memoryManager.update();
@@ -299,6 +302,9 @@ public class UnnestRecordBatch extends AbstractTableFunctionRecordBatch<UnnestPO
     // entire incoming recods has been unnested. If the entire records has been
     // unnested, we return EMIT and any blocking operators in the pipeline will
     // unblock.
+    if (logger.isDebugEnabled()) {
+      logger.debug("BATCH_STATS, outgoing:\n {}", new RecordBatchSizer(this));
+    }
     return hasRemainder ? IterOutcome.OK : IterOutcome.EMIT;
   }
 
@@ -347,9 +353,7 @@ public class UnnestRecordBatch extends AbstractTableFunctionRecordBatch<UnnestPO
     recordCount = 0;
     final List<TransferPair> transfers = Lists.newArrayList();
 
-    //TODO: fixthis once planner changes are done
-    final FieldReference fieldReference =
-        new FieldReference(SchemaPath.getSimplePath(popConfig.getColumn().toString() + "_flat"));
+    final FieldReference fieldReference = new FieldReference(popConfig.getColumn());
 
     final TransferPair transferPair = getUnnestFieldTransferPair(fieldReference);
 
@@ -377,11 +381,15 @@ public class UnnestRecordBatch extends AbstractTableFunctionRecordBatch<UnnestPO
     final MaterializedField thisField = incoming.getSchema().getColumn(fieldId.getFieldIds()[0]);
     final MaterializedField prevField = unnestFieldMetadata;
     Preconditions.checkNotNull(thisField);
-    unnestFieldMetadata = thisField;
+
     // isEquivalent may return false if the order of the fields has changed. This usually does not
     // happen but if it does we end up throwing a spurious schema change exeption
     if (prevField == null || !prevField.isEquivalent(thisField)) {
       logger.debug("Schema changed");
+      // We should store the clone of MaterializedField for unnest column instead of reference. When the column is of
+      // type Map and there is change in any children field of the Map then that will update the reference variable and
+      // isEquivalent check will still return true.
+      unnestFieldMetadata = thisField.clone();
       return true;
     }
     return false;
@@ -400,11 +408,11 @@ public class UnnestRecordBatch extends AbstractTableFunctionRecordBatch<UnnestPO
     stats.setLongStat(Metric.AVG_OUTPUT_ROW_BYTES, memoryManager.getAvgOutputRowWidth());
     stats.setLongStat(Metric.OUTPUT_RECORD_COUNT, memoryManager.getTotalOutputRecords());
 
-    logger.debug("input: batch count : {}, avg batch bytes : {},  avg row bytes : {}, record count : {}",
+    logger.debug("BATCH_STATS, incoming aggregate: batch count : {}, avg batch bytes : {},  avg row bytes : {}, record count : {}",
         memoryManager.getNumIncomingBatches(), memoryManager.getAvgInputBatchSize(),
         memoryManager.getAvgInputRowWidth(), memoryManager.getTotalInputRecords());
 
-    logger.debug("output: batch count : {}, avg batch bytes : {},  avg row bytes : {}, record count : {}",
+    logger.debug("BATCH_STATS, outgoing aggregate: batch count : {}, avg batch bytes : {},  avg row bytes : {}, record count : {}",
         memoryManager.getNumOutgoingBatches(), memoryManager.getAvgOutputBatchSize(),
         memoryManager.getAvgOutputRowWidth(), memoryManager.getTotalOutputRecords());
 

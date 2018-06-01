@@ -28,6 +28,7 @@ import org.apache.calcite.tools.RuleSet;
 import org.apache.calcite.tools.RuleSets;
 import org.apache.drill.exec.ops.OptimizerRulesContext;
 import org.apache.drill.exec.planner.logical.DrillAggregateRule;
+import org.apache.drill.exec.planner.logical.DrillCorrelateRule;
 import org.apache.drill.exec.planner.logical.DrillFilterAggregateTransposeRule;
 import org.apache.drill.exec.planner.logical.DrillFilterItemStarReWriterRule;
 import org.apache.drill.exec.planner.logical.DrillFilterJoinRules;
@@ -48,11 +49,13 @@ import org.apache.drill.exec.planner.logical.DrillRelFactories;
 import org.apache.drill.exec.planner.logical.DrillScanRule;
 import org.apache.drill.exec.planner.logical.DrillSortRule;
 import org.apache.drill.exec.planner.logical.DrillUnionAllRule;
+import org.apache.drill.exec.planner.logical.DrillUnnestRule;
 import org.apache.drill.exec.planner.logical.DrillValuesRule;
 import org.apache.drill.exec.planner.logical.DrillWindowRule;
 import org.apache.drill.exec.planner.logical.partition.ParquetPruneScanRule;
 import org.apache.drill.exec.planner.logical.partition.PruneScanRule;
 import org.apache.drill.exec.planner.physical.ConvertCountToDirectScan;
+import org.apache.drill.exec.planner.physical.CorrelatePrule;
 import org.apache.drill.exec.planner.physical.DirectScanPrule;
 import org.apache.drill.exec.planner.physical.FilterPrule;
 import org.apache.drill.exec.planner.physical.HashAggPrule;
@@ -70,6 +73,7 @@ import org.apache.drill.exec.planner.physical.SortConvertPrule;
 import org.apache.drill.exec.planner.physical.SortPrule;
 import org.apache.drill.exec.planner.physical.StreamAggPrule;
 import org.apache.drill.exec.planner.physical.UnionAllPrule;
+import org.apache.drill.exec.planner.physical.UnnestPrule;
 import org.apache.drill.exec.planner.physical.ValuesPrule;
 import org.apache.drill.exec.planner.physical.WindowPrule;
 import org.apache.drill.exec.planner.physical.WriterPrule;
@@ -261,8 +265,8 @@ public enum PlannerPhase {
       RuleInstance.UNION_TO_DISTINCT_RULE,
 
       // Add support for WHERE style joins.
-      DrillFilterJoinRules.DRILL_FILTER_ON_JOIN,
-      DrillFilterJoinRules.DRILL_JOIN,
+      DrillFilterJoinRules.FILTER_INTO_JOIN,
+      DrillFilterJoinRules.JOIN_PUSH_CONDITION,
       RuleInstance.JOIN_PUSH_EXPRESSIONS_RULE,
       // End support for WHERE style joins.
 
@@ -275,6 +279,7 @@ public enum PlannerPhase {
       DrillFilterAggregateTransposeRule.INSTANCE,
 
       RuleInstance.FILTER_MERGE_RULE,
+      RuleInstance.FILTER_CORRELATE_RULE,
       RuleInstance.AGGREGATE_REMOVE_RULE,
       RuleInstance.PROJECT_REMOVE_RULE,
       RuleInstance.SORT_REMOVE_RULE,
@@ -307,7 +312,9 @@ public enum PlannerPhase {
       DrillSortRule.INSTANCE,
       DrillJoinRule.INSTANCE,
       DrillUnionAllRule.INSTANCE,
-      DrillValuesRule.INSTANCE
+      DrillValuesRule.INSTANCE,
+      DrillUnnestRule.INSTANCE,
+      DrillCorrelateRule.INSTANCE
       ).build();
 
   /**
@@ -443,6 +450,9 @@ public enum PlannerPhase {
     ruleList.add(ValuesPrule.INSTANCE);
     ruleList.add(DirectScanPrule.INSTANCE);
 
+    ruleList.add(UnnestPrule.INSTANCE);
+    ruleList.add(CorrelatePrule.INSTANCE);
+
     ruleList.add(DrillPushLimitToScanRule.LIMIT_ON_PROJECT);
     ruleList.add(DrillPushLimitToScanRule.LIMIT_ON_SCAN);
 
@@ -522,19 +532,18 @@ public enum PlannerPhase {
 
   /**
    * RuleSet for join transitive closure, used only in HepPlanner.<p>
-   * TODO: {@link RuleInstance#JOIN_PUSH_TRANSITIVE_PREDICATES_RULE} should be copied to #staticRuleSet,
-   * once CALCITE-1048 is solved. This still should be present in {@link #TRANSITIVE_CLOSURE} stage
-   * for applying additional filters before {@link #DIRECTORY_PRUNING}.
+   * TODO: {@link RuleInstance#DRILL_JOIN_PUSH_TRANSITIVE_PREDICATES_RULE} should be moved into {@link #staticRuleSet},
+   * (with using {@link DrillRelFactories#LOGICAL_BUILDER}) once CALCITE-1048 is solved. This block can be removed then.
    *
    * @return set of planning rules
    */
   static RuleSet getJoinTransitiveClosureRules() {
     return RuleSets.ofList(ImmutableSet.<RelOptRule> builder()
         .add(
-            DrillFilterJoinRules.DRILL_FILTER_ON_JOIN,
-            DrillFilterJoinRules.DRILL_JOIN,
-            RuleInstance.JOIN_PUSH_TRANSITIVE_PREDICATES_RULE,
-            RuleInstance.FILTER_MERGE_RULE
+            RuleInstance.DRILL_JOIN_PUSH_TRANSITIVE_PREDICATES_RULE,
+            DrillFilterJoinRules.DRILL_FILTER_INTO_JOIN,
+            RuleInstance.REMOVE_IS_NOT_DISTINCT_FROM_RULE,
+            RuleInstance.DRILL_FILTER_MERGE_RULE
         ).build());
   }
 }

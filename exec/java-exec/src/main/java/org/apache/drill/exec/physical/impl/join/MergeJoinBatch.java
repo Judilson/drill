@@ -73,23 +73,23 @@ public class MergeJoinBatch extends AbstractBinaryRecordBatch<MergeJoinPOP> {
 
   private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(MergeJoinBatch.class);
 
-  public final MappingSet setupMapping =
+  private final MappingSet setupMapping =
     new MappingSet("null", "null",
       GM("doSetup", "doSetup", null, null),
       GM("doSetup", "doSetup", null, null));
-  public final MappingSet copyLeftMapping =
+  private final MappingSet copyLeftMapping =
     new MappingSet("leftIndex", "outIndex",
       GM("doSetup", "doSetup", null, null),
       GM("doSetup", "doCopyLeft", null, null));
-  public final MappingSet copyRightMappping =
+  private final MappingSet copyRightMappping =
     new MappingSet("rightIndex", "outIndex",
       GM("doSetup", "doSetup", null, null),
       GM("doSetup", "doCopyRight", null, null));
-  public final MappingSet compareMapping =
+  private final MappingSet compareMapping =
     new MappingSet("leftIndex", "rightIndex",
       GM("doSetup", "doSetup", null, null),
       GM("doSetup", "doCompare", null, null));
-  public final MappingSet compareRightMapping =
+  private final MappingSet compareRightMapping =
     new MappingSet("rightIndex", "null",
       GM("doSetup", "doSetup", null, null),
       GM("doSetup", "doCompare", null, null));
@@ -122,6 +122,9 @@ public class MergeJoinBatch extends AbstractBinaryRecordBatch<MergeJoinPOP> {
     @Override
     public void update(int inputIndex) {
       status.setTargetOutputRowCount(super.update(inputIndex, status.getOutPosition()));
+      if (logger.isDebugEnabled()) {
+        logger.debug("BATCH_STATS, incoming {}:\n {}", inputIndex == 0 ? "left" : "right", getRecordBatchSizer(inputIndex));
+      }
     }
   }
 
@@ -266,12 +269,34 @@ public class MergeJoinBatch extends AbstractBinaryRecordBatch<MergeJoinPOP> {
       Preconditions.checkArgument(!vw.isHyper());
       vw.getValueVector().getMutator().setValueCount(getRecordCount());
     }
+
+    if (logger.isDebugEnabled()) {
+      logger.debug("BATCH_STATS, outgoing:\n {}", new RecordBatchSizer(this));
+    }
+
     batchMemoryManager.updateOutgoingStats(getRecordCount());
   }
 
   @Override
   public void close() {
     updateBatchMemoryManagerStats();
+
+    logger.debug("BATCH_STATS, incoming aggregate left: batch count : {}, avg bytes : {},  avg row bytes : {}, record count : {}",
+      batchMemoryManager.getNumIncomingBatches(JoinBatchMemoryManager.LEFT_INDEX),
+      batchMemoryManager.getAvgInputBatchSize(JoinBatchMemoryManager.LEFT_INDEX),
+      batchMemoryManager.getAvgInputRowWidth(JoinBatchMemoryManager.LEFT_INDEX),
+      batchMemoryManager.getTotalInputRecords(JoinBatchMemoryManager.LEFT_INDEX));
+
+    logger.debug("BATCH_STATS, incoming aggregate right: batch count : {}, avg bytes : {},  avg row bytes : {}, record count : {}",
+      batchMemoryManager.getNumIncomingBatches(JoinBatchMemoryManager.RIGHT_INDEX),
+      batchMemoryManager.getAvgInputBatchSize(JoinBatchMemoryManager.RIGHT_INDEX),
+      batchMemoryManager.getAvgInputRowWidth(JoinBatchMemoryManager.RIGHT_INDEX),
+      batchMemoryManager.getTotalInputRecords(JoinBatchMemoryManager.RIGHT_INDEX));
+
+    logger.debug("BATCH_STATS, outgoing aggregate: batch count : {}, avg bytes : {},  avg row bytes : {}, record count : {}",
+      batchMemoryManager.getNumOutgoingBatches(), batchMemoryManager.getAvgOutputBatchSize(),
+      batchMemoryManager.getAvgOutputRowWidth(), batchMemoryManager.getTotalOutputRecords());
+
     super.close();
     leftIterator.close();
     rightIterator.close();

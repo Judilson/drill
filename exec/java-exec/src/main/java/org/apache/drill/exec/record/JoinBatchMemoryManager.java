@@ -17,8 +17,6 @@
  */
 package org.apache.drill.exec.record;
 
-import org.apache.drill.exec.ops.MetricDef;
-
 public class JoinBatchMemoryManager extends RecordBatchMemoryManager {
   private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(JoinBatchMemoryManager.class);
 
@@ -48,12 +46,10 @@ public class JoinBatchMemoryManager extends RecordBatchMemoryManager {
       case LEFT_INDEX:
         setRecordBatchSizer(inputIndex, new RecordBatchSizer(leftIncoming));
         leftRowWidth = getRecordBatchSizer(inputIndex).getRowAllocSize();
-        logger.debug("left incoming batch size : {}", getRecordBatchSizer(inputIndex));
         break;
       case RIGHT_INDEX:
         setRecordBatchSizer(inputIndex, new RecordBatchSizer(rightIncoming));
         rightRowWidth = getRecordBatchSizer(inputIndex).getRowAllocSize();
-        logger.debug("right incoming batch size : {}", getRecordBatchSizer(inputIndex));
       default:
         break;
     }
@@ -85,9 +81,6 @@ public class JoinBatchMemoryManager extends RecordBatchMemoryManager {
     // set the new row width
     setOutgoingRowWidth(newOutgoingRowWidth);
 
-    logger.debug("output batch size : {}, avg outgoing rowWidth : {}, output rowCount : {}",
-      getOutputBatchSize(), getOutgoingRowWidth(), getOutputRowCount());
-
     return adjustOutputRowCount(outputPosition + numOutputRowsRemaining);
   }
 
@@ -100,25 +93,5 @@ public class JoinBatchMemoryManager extends RecordBatchMemoryManager {
       return leftSizer.getColumn(name);
     }
     return rightSizer == null ? null : rightSizer.getColumn(name);
-  }
-
-  public enum Metric implements MetricDef {
-    LEFT_INPUT_BATCH_COUNT,
-    LEFT_AVG_INPUT_BATCH_BYTES,
-    LEFT_AVG_INPUT_ROW_BYTES,
-    LEFT_INPUT_RECORD_COUNT,
-    RIGHT_INPUT_BATCH_COUNT,
-    RIGHT_AVG_INPUT_BATCH_BYTES,
-    RIGHT_AVG_INPUT_ROW_BYTES,
-    RIGHT_INPUT_RECORD_COUNT,
-    OUTPUT_BATCH_COUNT,
-    AVG_OUTPUT_BATCH_BYTES,
-    AVG_OUTPUT_ROW_BYTES,
-    OUTPUT_RECORD_COUNT;
-
-    @Override
-    public int metricId() {
-      return ordinal();
-    }
   }
 }

@@ -30,6 +30,7 @@ import org.apache.drill.common.exceptions.DrillRuntimeException;
 import org.apache.drill.common.expression.SchemaPath;
 import org.apache.drill.common.types.TypeProtos.DataMode;
 import org.apache.drill.common.types.TypeProtos.MinorType;
+import org.apache.drill.common.types.Types;
 import org.apache.drill.common.util.DrillVersionInfo;
 import org.apache.drill.exec.ExecConstants;
 import org.apache.drill.exec.exception.OutOfMemoryException;
@@ -229,7 +230,8 @@ public class ParquetRecordWriter extends ParquetOutputRecordWriter {
     // Its value is likely below Integer.MAX_VALUE (2GB), although rowGroupSize is a long type.
     // Therefore this size is cast to int, since allocating byte array in under layer needs to
     // limit the array size in an int scope.
-    int initialBlockBufferSize = max(MINIMUM_BUFFER_SIZE, blockSize / this.schema.getColumns().size() / 5);
+    int initialBlockBufferSize = this.schema.getColumns().size() > 0 ?
+        max(MINIMUM_BUFFER_SIZE, blockSize / this.schema.getColumns().size() / 5) : MINIMUM_BUFFER_SIZE;
     // We don't want this number to be too small either. Ideally, slightly bigger than the page size,
     // but not bigger than the block buffer
     int initialPageBufferSize = max(MINIMUM_BUFFER_SIZE, min(pageSize + pageSize / 10, initialBlockBufferSize));
@@ -251,7 +253,7 @@ public class ParquetRecordWriter extends ParquetOutputRecordWriter {
     String name = field.getName();
     int length = ParquetTypeHelper.getLengthForMinorType(minorType);
     PrimitiveTypeName primitiveTypeName = ParquetTypeHelper.getPrimitiveTypeNameForMinorType(minorType);
-    if (DecimalUtility.isDecimalType(minorType)) {
+    if (Types.isDecimalType(minorType)) {
       primitiveTypeName = logicalTypeForDecimals;
       if (usePrimitiveTypesForDecimals) {
         if (field.getPrecision() <= ParquetTypeHelper.getMaxPrecisionForPrimitiveType(PrimitiveTypeName.INT32)) {
